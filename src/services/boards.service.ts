@@ -106,8 +106,10 @@ export const boardsService = {
     pageSize = 20,
     filterBy: 'published' | 'draft' | 'all' = 'published',
   ): Promise<PaginatedData<BoardSummary>> {
+    // Backend requires tappablePageSize > 0 even though we don't render
+    // tappables in the dashboard list. Pass a small default.
     const res = await apiClient.get<ApiResponse<PaginatedData<BoardSummary>>>(
-      `/board/fetchSavedBoard?page=${page}&pageSize=${pageSize}&filterBy=${filterBy}`,
+      `/board/fetchSavedBoard?page=${page}&pageSize=${pageSize}&filterBy=${filterBy}&tappablePageSize=1`,
     )
     return res.data.data
   },
