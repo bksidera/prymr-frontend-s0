@@ -58,7 +58,8 @@ export function BoardFrame({ imageUrl, onTap, overlay }: Props) {
           style={{
             width: frameW,
             height: frameH,
-            transform: `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`,
+            // `transform` is set imperatively by usePanZoom on each frame.
+            // Don't manage it via React state here or the two will fight.
             transformOrigin: 'center center',
             willChange: 'transform',
           }}
