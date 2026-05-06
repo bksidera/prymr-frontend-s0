@@ -4,9 +4,11 @@ import { authService } from '../services/auth.service'
 import { authStore, useAuth } from '../stores/authStore'
 
 function randomPassword(): string {
+  // Backend requires uppercase + lowercase + digit + special char, min 8.
   const arr = new Uint8Array(12)
   crypto.getRandomValues(arr)
-  return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('')
+  const hex = Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `Aa1!${hex}`
 }
 
 export function useGuestAuth() {
