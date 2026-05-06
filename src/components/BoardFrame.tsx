@@ -54,11 +54,11 @@ export function BoardFrame({ imageUrl, onTap, overlay }: Props) {
       className="absolute inset-0 overflow-hidden flex items-center justify-center select-none"
       style={{
         touchAction: 'none',
-        // Subtle radial gradient: faint lift around the image, deepening to
-        // pure black at the corners. Reads as a gallery spotlight without
-        // feeling theatrical.
+        // Dark grey throughout, never reaches pure black — keeps the surround
+        // feeling like a gallery wall instead of a void. Center is slightly
+        // lifted to suggest soft spotlighting.
         background:
-          'radial-gradient(ellipse at center, #1c1c1f 0%, #0a0a0b 55%, #000 100%)',
+          'radial-gradient(ellipse at center, #2a2a2d 0%, #1a1a1c 70%, #141416 100%)',
       }}
     >
       {frameW > 0 && (

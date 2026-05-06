@@ -1,18 +1,17 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { boardsService, type BoardSummary } from '../services/boards.service'
+import { boardsService, type MyBoard } from '../services/boards.service'
 
 function shareUrlFor(boardId: string): string {
   return `${window.location.origin}/b/${boardId}`
 }
 
 interface RowProps {
-  board: BoardSummary
+  board: MyBoard
 }
 
 function BoardRow({ board }: RowProps) {
-  const image = board.BoardImages[0]
-  const url = shareUrlFor(board.id)
+  const url = shareUrlFor(board.boardId)
   const [copied, setCopied] = useState(false)
 
   async function copy() {
@@ -30,9 +29,9 @@ function BoardRow({ board }: RowProps) {
         className="shrink-0 w-12 h-16 bg-neutral-800 rounded-md overflow-hidden flex items-center justify-center"
         title="Open board"
       >
-        {image?.imageUrl ? (
+        {board.imageUrl ? (
           <img
-            src={image.imageUrl}
+            src={board.imageUrl}
             alt=""
             className="w-full h-full object-cover"
             loading="lazy"
@@ -64,8 +63,8 @@ function BoardRow({ board }: RowProps) {
 
 export function MyBoardsList() {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['my-boards', 'published'],
-    queryFn: () => boardsService.getMyBoards(1, 50, 'published'),
+    queryKey: ['my-boards'],
+    queryFn: () => boardsService.getMyBoards(1, 50),
   })
 
   return (
@@ -74,9 +73,7 @@ export function MyBoardsList() {
         Your boards
       </h2>
 
-      {isLoading && (
-        <p className="text-sm text-neutral-500">Loading…</p>
-      )}
+      {isLoading && <p className="text-sm text-neutral-500">Loading…</p>}
 
       {error && (
         <p className="text-sm text-red-400">
@@ -84,16 +81,17 @@ export function MyBoardsList() {
         </p>
       )}
 
-      {data && data.items.length === 0 && (
+      {data && data.length === 0 && (
         <p className="text-sm text-neutral-500">
-          You haven't published anything yet. Upload an image above to make your first board.
+          You haven't published anything yet. Upload an image above to make your
+          first board.
         </p>
       )}
 
-      {data && data.items.length > 0 && (
+      {data && data.length > 0 && (
         <ul className="space-y-2">
-          {data.items.map((board) => (
-            <li key={board.id}>
+          {data.map((board) => (
+            <li key={board.boardImageId}>
               <BoardRow board={board} />
             </li>
           ))}

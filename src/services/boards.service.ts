@@ -1,7 +1,6 @@
 import apiClient from './apiClient'
 import type {
   ApiResponse,
-  PaginatedData,
   PublicBoardResponse,
   ReactionPin,
   ReactionDetail,
@@ -14,15 +13,22 @@ export interface CreateBoardResult {
   boardImageId: string
 }
 
-export interface BoardSummary {
-  id: string
-  userId: string
-  createdAt: string
-  BoardImages: Array<{
-    id: string
-    imageUrl: string
-    boardStatus: string
-    jsonElement: string
+/** Flattened shape consumed by the dashboard list. */
+export interface MyBoard {
+  boardId: string
+  boardImageId: string
+  imageUrl: string | null
+  lastEdited: string
+}
+
+/** Raw shape returned by /board/fetchSavedBoard (one entry per Board, each
+ * with a `.board` array of BoardImages). */
+interface RawSavedBoardItem {
+  board: Array<{
+    boardId: string
+    boardImageId: string
+    boardImage: string | null
+    lastEdited: string
   }>
 }
 
@@ -101,17 +107,26 @@ export const boardsService = {
     return res.data.data.data
   },
 
-  async getMyBoards(
-    page = 1,
-    pageSize = 20,
-    filterBy: 'published' | 'draft' | 'all' = 'published',
-  ): Promise<PaginatedData<BoardSummary>> {
-    // Backend requires tappablePageSize > 0 even though we don't render
-    // tappables in the dashboard list. Pass a small default.
-    const res = await apiClient.get<ApiResponse<PaginatedData<BoardSummary>>>(
-      `/board/fetchSavedBoard?page=${page}&pageSize=${pageSize}&filterBy=${filterBy}&tappablePageSize=1`,
+  async getMyBoards(page = 1, pageSize = 20): Promise<MyBoard[]> {
+    // Note: backend's filterBy=published / draft path crashes because it
+    // dereferences customWhereClause.BoardImages.every on an empty object
+    // (board.service.ts:2717). Use filterBy=all. Backend's response shape
+    // is { count, data: [{ board: [...] }, ...] } — not the PaginatedData
+    // shape the old type claimed. Flatten the nested arrays on the way out.
+    const res = await apiClient.get<
+      ApiResponse<{ count: number; data: RawSavedBoardItem[] }>
+    >(
+      `/board/fetchSavedBoard?page=${page}&pageSize=${pageSize}&filterBy=all&tappablePageSize=1`,
     )
-    return res.data.data
+    const items = res.data.data.data ?? []
+    return items.flatMap((entry) =>
+      (entry.board ?? []).map((b) => ({
+        boardId: b.boardId,
+        boardImageId: b.boardImageId,
+        imageUrl: b.boardImage ?? null,
+        lastEdited: b.lastEdited,
+      })),
+    )
   },
 
   async getReactionDetail(reactionId: string): Promise<ReactionDetail> {
