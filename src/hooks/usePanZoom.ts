@@ -18,9 +18,10 @@ const MAX_SCALE = 5
 const TAP_MOVE_THRESHOLD = 8 // px
 const TAP_TIME_THRESHOLD = 300 // ms
 
-// Velocity damping: e^(-dt / TIME_CONSTANT) per ms.
-// ~250ms feels like Google Maps / iOS scroll inertia.
-const MOMENTUM_TIME_CONSTANT_MS = 250
+// Velocity damping: e^(-dt / TIME_CONSTANT) per ms. Higher = longer coast.
+// ~450ms gives a "Google Maps flick" feel — the image keeps gliding noticeably
+// after release.
+const MOMENTUM_TIME_CONSTANT_MS = 450
 const MOMENTUM_STOP_SPEED = 0.02 // px/ms; below this, kill momentum
 // Smoothing for the velocity estimator during drag.
 const VELOCITY_SMOOTHING = 0.25
@@ -28,6 +29,26 @@ const VELOCITY_SMOOTHING = 0.25
 const WHEEL_ZOOM_SENSITIVITY = 0.0015
 // Debounce React-state commit after wheel events stop.
 const WHEEL_COMMIT_DEBOUNCE_MS = 120
+
+// Elastic overscroll: allow drag past the hard clamp by up to this many
+// pixels with rubber-band resistance, then spring back on release.
+const OVERSCROLL_MAX_PX = 28
+// Rubber-band stiffness — iOS uses ~0.55. Lower = looser overshoot.
+const RUBBER_BAND_C = 0.55
+// Spring-back to clamp: exp-decay time constant. ~120ms is snappy.
+const SPRING_BACK_TIME_CONSTANT_MS = 120
+// Spring-back stops when within this many px of target.
+const SPRING_BACK_EPSILON_PX = 0.3
+
+/**
+ * iOS-style rubber-band: as overshoot grows, returned offset asymptotically
+ * approaches OVERSCROLL_MAX_PX. Linear-ish near zero so first few px feel real.
+ */
+function rubberBand(overshoot: number): number {
+  const max = OVERSCROLL_MAX_PX
+  const c = RUBBER_BAND_C
+  return max * (1 - 1 / ((overshoot * c) / max + 1))
+}
 
 interface PointerPos {
   x: number
@@ -88,6 +109,7 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
   const dragRef = useRef<DragState | null>(null)
   const pinchRef = useRef<PinchState | null>(null)
   const momentumRafRef = useRef<number | null>(null)
+  const springBackRafRef = useRef<number | null>(null)
   const wheelCommitRef = useRef<number | null>(null)
 
   // ----- Geometry helpers -----
@@ -99,25 +121,60 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
   }, [])
 
-  const clampPan = useCallback((scale: number, tx: number, ty: number) => {
+  /** Compute the pan bounds for a given scale. Returns the absolute max
+   * |tx| and |ty| beyond which there's no real content to reveal. */
+  const panBounds = useCallback((scale: number) => {
     const container = containerRef.current
     const image = imageRef.current
-    if (!container || !image) return { tx, ty, clampedX: false, clampedY: false }
+    if (!container || !image) return { maxX: 0, maxY: 0 }
     const cw = container.clientWidth
     const ch = container.clientHeight
     const iw = image.clientWidth * scale
     const ih = image.clientHeight * scale
-    const maxX = Math.max(0, (iw - cw) / 2)
-    const maxY = Math.max(0, (ih - ch) / 2)
-    const ctx = Math.max(-maxX, Math.min(maxX, tx))
-    const cty = Math.max(-maxY, Math.min(maxY, ty))
     return {
-      tx: ctx,
-      ty: cty,
-      clampedX: ctx !== tx,
-      clampedY: cty !== ty,
+      maxX: Math.max(0, (iw - cw) / 2),
+      maxY: Math.max(0, (ih - ch) / 2),
     }
   }, [])
+
+  /** Hard clamp — used by momentum, wheel, pinch. Snaps to bounds. */
+  const hardClampPan = useCallback(
+    (scale: number, tx: number, ty: number) => {
+      const { maxX, maxY } = panBounds(scale)
+      const ctx = Math.max(-maxX, Math.min(maxX, tx))
+      const cty = Math.max(-maxY, Math.min(maxY, ty))
+      return {
+        tx: ctx,
+        ty: cty,
+        clampedX: ctx !== tx,
+        clampedY: cty !== ty,
+      }
+    },
+    [panBounds],
+  )
+
+  /** Rubber-band clamp — used during active drag. Allows up to
+   * OVERSCROLL_MAX_PX of overshoot with diminishing returns (asymptotic). */
+  const rubberClampPan = useCallback(
+    (scale: number, tx: number, ty: number) => {
+      const { maxX, maxY } = panBounds(scale)
+
+      const rubber = (value: number, max: number): number => {
+        if (value > max) {
+          const over = value - max
+          return max + rubberBand(over)
+        }
+        if (value < -max) {
+          const over = -value - max
+          return -(max + rubberBand(over))
+        }
+        return value
+      }
+
+      return { tx: rubber(tx, maxX), ty: rubber(ty, maxY) }
+    },
+    [panBounds],
+  )
 
   const applyTransform = useCallback(() => {
     const el = imageRef.current
@@ -126,15 +183,27 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
     el.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`
   }, [])
 
-  /** Update hot state + DOM. Returns whether a clamp was hit (per axis). */
+  /** Update hot state + DOM with a hard clamp. Returns whether a clamp was
+   * hit on each axis (used by momentum to kill velocity into walls). */
   const setLive = useCallback(
     (scale: number, tx: number, ty: number) => {
-      const clamped = clampPan(scale, tx, ty)
+      const clamped = hardClampPan(scale, tx, ty)
       stateRef.current = { scale, tx: clamped.tx, ty: clamped.ty }
       applyTransform()
       return clamped
     },
-    [clampPan, applyTransform],
+    [hardClampPan, applyTransform],
+  )
+
+  /** Update hot state + DOM with rubber-band overshoot. Used during active
+   * drag so the image gives slightly past the boundary. */
+  const setLiveRubber = useCallback(
+    (scale: number, tx: number, ty: number) => {
+      const rubber = rubberClampPan(scale, tx, ty)
+      stateRef.current = { scale, tx: rubber.tx, ty: rubber.ty }
+      applyTransform()
+    },
+    [rubberClampPan, applyTransform],
   )
 
   const commit = useCallback(() => {
@@ -175,7 +244,7 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
     return { imageX: ix, imageY: iy }
   }, [])
 
-  // ----- Momentum -----
+  // ----- Momentum + spring-back -----
 
   const stopMomentum = useCallback(() => {
     if (momentumRafRef.current !== null) {
@@ -183,6 +252,43 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
       momentumRafRef.current = null
     }
   }, [])
+
+  const stopSpringBack = useCallback(() => {
+    if (springBackRafRef.current !== null) {
+      cancelAnimationFrame(springBackRafRef.current)
+      springBackRafRef.current = null
+    }
+  }, [])
+
+  /** Animate tx, ty back to the hard-clamped target via exp decay.
+   * Used when a drag ended in overscroll territory. */
+  const startSpringBack = useCallback(() => {
+    stopSpringBack()
+    let lastT = performance.now()
+
+    const step = (now: number) => {
+      const dt = Math.min(50, now - lastT)
+      lastT = now
+
+      const { scale, tx, ty } = stateRef.current
+      const target = hardClampPan(scale, tx, ty)
+      const dx = target.tx - tx
+      const dy = target.ty - ty
+
+      if (Math.abs(dx) < SPRING_BACK_EPSILON_PX && Math.abs(dy) < SPRING_BACK_EPSILON_PX) {
+        // Snap exactly to target, commit, done.
+        setLive(scale, target.tx, target.ty)
+        springBackRafRef.current = null
+        commit()
+        return
+      }
+
+      const k = 1 - Math.exp(-dt / SPRING_BACK_TIME_CONSTANT_MS)
+      setLive(scale, tx + dx * k, ty + dy * k)
+      springBackRafRef.current = requestAnimationFrame(step)
+    }
+    springBackRafRef.current = requestAnimationFrame(step)
+  }, [hardClampPan, setLive, stopSpringBack, commit])
 
   const startMomentum = useCallback(
     (vx0: number, vy0: number) => {
@@ -227,6 +333,7 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
     (e: React.PointerEvent<HTMLDivElement>) => {
       ;(e.target as Element).setPointerCapture?.(e.pointerId)
       stopMomentum()
+      stopSpringBack()
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
       if (pointersRef.current.size === 1) {
@@ -257,7 +364,7 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
         dragRef.current = null
       }
     },
-    [stopMomentum],
+    [stopMomentum, stopSpringBack],
   )
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -298,9 +405,11 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
       drag.lastY = e.clientY
       drag.lastT = now
 
-      setLive(stateRef.current.scale, drag.startTx + dx, drag.startTy + dy)
+      // Rubber-band during active drag so the image yields slightly past
+      // the clamp boundary instead of feeling locked.
+      setLiveRubber(stateRef.current.scale, drag.startTx + dx, drag.startTy + dy)
     }
-  }, [zoomToward, setLive])
+  }, [zoomToward, setLiveRubber])
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -356,11 +465,21 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
         return
       }
 
-      // End of drag: kick off momentum if velocity is meaningful.
+      // End of drag.
       if (sizeBefore === 1 && drag) {
+        dragRef.current = null
+        const { scale, tx, ty } = stateRef.current
+        const target = hardClampPan(scale, tx, ty)
+        const inOverscroll = target.tx !== tx || target.ty !== ty
+
+        if (inOverscroll) {
+          // Spring back to the clamp boundary; ignore residual velocity.
+          startSpringBack()
+          return
+        }
+
         const speed = Math.hypot(drag.vx, drag.vy)
         if (speed > MOMENTUM_STOP_SPEED * 4) {
-          dragRef.current = null
           startMomentum(drag.vx, drag.vy)
           return
         }
@@ -369,7 +488,7 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
       dragRef.current = null
       commit()
     },
-    [commit, onTap, screenToImage, startMomentum],
+    [commit, onTap, screenToImage, startMomentum, startSpringBack, hardClampPan],
   )
 
   // ----- Wheel zoom (toward cursor) -----
@@ -389,6 +508,7 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
     const onWheel = (ev: WheelEvent) => {
       ev.preventDefault()
       stopMomentum()
+      stopSpringBack()
       const factor = Math.exp(-ev.deltaY * WHEEL_ZOOM_SENSITIVITY)
       const requestedScale = stateRef.current.scale * factor
       zoomToward(ev.clientX, ev.clientY, requestedScale)
@@ -403,7 +523,7 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
         wheelCommitRef.current = null
       }
     }
-  }, [commit, stopMomentum, zoomToward])
+  }, [commit, stopMomentum, stopSpringBack, zoomToward])
 
   // Re-apply transform after image element mounts/resizes (otherwise initial
   // render shows scale 1 even if state was rehydrated — not relevant here, but
@@ -411,6 +531,14 @@ export function usePanZoom(opts: { onTap?: (e: TapEvent) => void }) {
   useEffect(() => {
     applyTransform()
   })
+
+  // Cancel any in-flight RAF on unmount so we don't leak frames.
+  useEffect(() => {
+    return () => {
+      stopMomentum()
+      stopSpringBack()
+    }
+  }, [stopMomentum, stopSpringBack])
 
   return {
     containerRef,
