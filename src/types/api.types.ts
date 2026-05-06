@@ -4,6 +4,13 @@ export interface ApiResponse<T = unknown> {
   data: T
 }
 
+export interface PaginatedData<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 export interface ReactionPin {
   id: string
   top: string | null

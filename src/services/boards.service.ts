@@ -1,6 +1,7 @@
 import apiClient from './apiClient'
 import type {
   ApiResponse,
+  PaginatedData,
   PublicBoardResponse,
   ReactionPin,
   ReactionDetail,
@@ -11,6 +12,18 @@ import { serializeBoard, deserializeBoard } from '../utils/boardSchema'
 export interface CreateBoardResult {
   boardId: string
   boardImageId: string
+}
+
+export interface BoardSummary {
+  id: string
+  userId: string
+  createdAt: string
+  BoardImages: Array<{
+    id: string
+    imageUrl: string
+    boardStatus: string
+    jsonElement: string
+  }>
 }
 
 export interface AddReactionInput {
@@ -86,6 +99,17 @@ export const boardsService = {
       `/board/fetchBoardReactionPins?boardImageId=${boardImageId}`,
     )
     return res.data.data.data
+  },
+
+  async getMyBoards(
+    page = 1,
+    pageSize = 20,
+    filterBy: 'published' | 'draft' | 'all' = 'published',
+  ): Promise<PaginatedData<BoardSummary>> {
+    const res = await apiClient.get<ApiResponse<PaginatedData<BoardSummary>>>(
+      `/board/fetchSavedBoard?page=${page}&pageSize=${pageSize}&filterBy=${filterBy}`,
+    )
+    return res.data.data
   },
 
   async getReactionDetail(reactionId: string): Promise<ReactionDetail> {

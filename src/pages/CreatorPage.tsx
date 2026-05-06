@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { v4 as uuidv4 } from 'uuid'
 import { ImageUploader } from '../components/ImageUploader'
+import { MyBoardsList } from '../components/MyBoardsList'
 import { boardsService } from '../services/boards.service'
 import { authStore, useAuth } from '../stores/authStore'
 import { createEmptyBoard } from '../utils/boardSchema'
@@ -10,6 +12,7 @@ type Phase = 'idle' | 'uploaded' | 'publishing' | 'published' | 'error'
 
 export function CreatorPage() {
   const { user } = useAuth()
+  const queryClient = useQueryClient()
   const [phase, setPhase] = useState<Phase>('idle')
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [shareUrl, setShareUrl] = useState<string | null>(null)
@@ -46,6 +49,8 @@ export function CreatorPage() {
       const url = await boardsService.publishBoard(boardId, boardImageId)
       setShareUrl(url)
       setPhase('published')
+      // Refresh the "Your boards" list so the new one shows up immediately.
+      void queryClient.invalidateQueries({ queryKey: ['my-boards'] })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Publish failed')
       setPhase('error')
@@ -155,6 +160,8 @@ export function CreatorPage() {
           </div>
         )}
       </div>
+
+      <MyBoardsList />
     </div>
   )
 }
