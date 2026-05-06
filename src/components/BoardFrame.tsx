@@ -31,16 +31,19 @@ export function BoardFrame({ imageUrl, onTap, overlay }: Props) {
   }, [containerRef])
 
   // Compute fit-to-viewport size preserving the image's natural aspect ratio.
+  // Leave a small "margin" of breathing room around the image so it feels
+  // matted, not edge-to-edge.
+  const MARGIN = 0.92 // image fills 92% of its limiting dimension
   let frameW = 0
   let frameH = 0
   if (naturalRatio && viewport.w > 0 && viewport.h > 0) {
     const viewportRatio = viewport.w / viewport.h
     if (viewportRatio > naturalRatio) {
-      frameH = viewport.h
-      frameW = viewport.h * naturalRatio
+      frameH = viewport.h * MARGIN
+      frameW = frameH * naturalRatio
     } else {
-      frameW = viewport.w
-      frameH = viewport.w / naturalRatio
+      frameW = viewport.w * MARGIN
+      frameH = frameW / naturalRatio
     }
   }
 
@@ -48,20 +51,29 @@ export function BoardFrame({ imageUrl, onTap, overlay }: Props) {
     <div
       ref={containerRef}
       {...handlers}
-      className="absolute inset-0 overflow-hidden bg-black flex items-center justify-center select-none"
-      style={{ touchAction: 'none' }}
+      className="absolute inset-0 overflow-hidden flex items-center justify-center select-none"
+      style={{
+        touchAction: 'none',
+        // Subtle radial gradient: faint lift around the image, deepening to
+        // pure black at the corners. Reads as a gallery spotlight without
+        // feeling theatrical.
+        background:
+          'radial-gradient(ellipse at center, #1c1c1f 0%, #0a0a0b 55%, #000 100%)',
+      }}
     >
       {frameW > 0 && (
         <div
           ref={imageRef}
-          className="relative"
+          className="relative ring-1 ring-white/[0.07]"
           style={{
             width: frameW,
             height: frameH,
             // `transform` is set imperatively by usePanZoom on each frame.
-            // Don't manage it via React state here or the two will fight.
             transformOrigin: 'center center',
             willChange: 'transform',
+            // Deep, soft drop shadow lifts the image off the surround.
+            boxShadow:
+              '0 40px 100px -20px rgba(0,0,0,0.95), 0 0 0 1px rgba(255,255,255,0.04)',
           }}
         >
           <img

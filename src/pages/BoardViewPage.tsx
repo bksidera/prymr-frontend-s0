@@ -8,6 +8,8 @@ import { BoardFrame } from '../components/BoardFrame'
 import { ReactionComposer, type ComposerSubmit } from '../components/ReactionComposer'
 import { ReactionPin } from '../components/ReactionPin'
 import { ReactionDetailPopover } from '../components/ReactionDetailPopover'
+import { PinSparkle } from '../components/PinSparkle'
+import { AppreciationToast } from '../components/AppreciationToast'
 import type { TapEvent } from '../hooks/usePanZoom'
 
 interface ComposerState {
@@ -38,6 +40,10 @@ export function BoardViewPage() {
 
   const [composer, setComposer] = useState<ComposerState | null>(null)
   const [detail, setDetail] = useState<DetailState | null>(null)
+  // Celebration state for paid-reaction submissions. Sparkle and toast each
+  // clear their own state when their animations finish.
+  const [sparkle, setSparkle] = useState<{ x: number; y: number; key: number } | null>(null)
+  const [toastVisible, setToastVisible] = useState(false)
 
   function onTap(e: TapEvent) {
     setDetail(null)
@@ -69,6 +75,14 @@ export function BoardViewPage() {
       },
       pendingAmount: c.paymentAmount ?? undefined,
     })
+
+    // Celebrate paid reactions. Use the tap coordinates as the sparkle origin
+    // (slightly offset upward so the burst centers visually on the new pin).
+    if (c.paymentAmount && c.paymentAmount > 0) {
+      setSparkle({ x: composer.clientX, y: composer.clientY, key: Date.now() })
+      setToastVisible(true)
+    }
+
     setComposer(null)
   }
 
@@ -152,6 +166,17 @@ export function BoardViewPage() {
           onClose={() => setDetail(null)}
         />
       )}
+
+      {sparkle && (
+        <PinSparkle
+          key={sparkle.key}
+          x={sparkle.x}
+          y={sparkle.y}
+          onDone={() => setSparkle(null)}
+        />
+      )}
+
+      {toastVisible && <AppreciationToast onDone={() => setToastVisible(false)} />}
     </div>
   )
 }

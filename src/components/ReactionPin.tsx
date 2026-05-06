@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion'
 import type { OptimisticPin } from '../hooks/useBoardReactions'
 
 interface Props {
@@ -16,7 +17,7 @@ export function ReactionPin({ pin, scale, onClick }: Props) {
   const avatar = pin.user?.profileIcon ?? pin.user?.initialProfileIcon ?? null
   const initial = (pin.user?.userName ?? '?').slice(0, 1).toUpperCase()
 
-  // Counter-scale the pin so it stays the same on-screen size as the user zooms.
+  // Counter-scale so pin stays a constant on-screen size as the image zooms.
   const inv = 1 / scale
 
   return (
@@ -33,12 +34,17 @@ export function ReactionPin({ pin, scale, onClick }: Props) {
         transformOrigin: 'center center',
       }}
     >
-      <span
-        className={`block w-6 h-6 rounded-full overflow-hidden border-2 ${
+      {/* Inner motion span handles the entry pop-in — independent of the
+       * outer counter-scale transform. */}
+      <motion.span
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: 'spring', damping: 14, stiffness: 320 }}
+        className={`block w-6 h-6 rounded-full overflow-hidden border-2 bg-neutral-800 flex items-center justify-center text-[10px] font-medium ${
           hasPayment
-            ? 'border-amber-300 shadow-[0_0_12px_rgba(255,200,80,0.7)]'
+            ? 'border-amber-300 shadow-[0_0_14px_rgba(255,200,80,0.7)]'
             : 'border-white/80'
-        } bg-neutral-800 flex items-center justify-center text-[10px] font-medium`}
+        }`}
       >
         {avatar ? (
           <img src={avatar} alt="" className="w-full h-full object-cover" />
@@ -47,7 +53,7 @@ export function ReactionPin({ pin, scale, onClick }: Props) {
         ) : (
           initial
         )}
-      </span>
+      </motion.span>
     </button>
   )
 }
