@@ -46,6 +46,13 @@ export function ReactionPin({ pin, scale, onClick }: Props) {
 
   return (
     <button
+      // Stop pointer events so the container's pan/zoom + tap detection
+      // doesn't compete with the pin's own click. Without this, on iOS
+      // Safari the container fires onTap (opening the composer) BEFORE
+      // the pin's click fires reliably, and the click may not fire at all
+      // due to known pointer-capture quirks.
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation()
         onClick((e.currentTarget as HTMLElement).getBoundingClientRect())
